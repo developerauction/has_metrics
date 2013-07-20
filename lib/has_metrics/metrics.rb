@@ -120,6 +120,13 @@ module Metrics
     end
 
     def process_single_metrics(*args)
+      puts "Slow Metrics Found :: #{single_only_metrics.count} \n"
+      puts " --  --  --  -- \n"
+      puts "Go implement their aggregate methods in #{self} to speed this up.\n"
+      puts single_only_metrics.keys
+      puts "\n ≈ ≈ ≈ ≈ ≈ ≈ ≈ "
+      sleep 5.seconds
+
       find_in_batches do |batch|
         metrics_class.transaction do
           batch.each do |record|
