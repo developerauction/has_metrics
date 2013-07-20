@@ -1,29 +1,43 @@
 require 'spec_helper'
 
+create_tables_for(:user)
+
+class Pet < ActiveRecord::Base
+
+end
+
+class User < ActiveRecord::Base
+  include Metrics
+  has_many :pets, dependent: :destroy
+
+  has_metric :name_length do
+    name.length
+  end
+
+  has_metric :pets_count do
+    pets.count
+  end
+
+  has_metric :average_pet_weight,
+             aggregate: -> { UserMetrics.update_all(average_pet_weight: 2) },
+             single: -> { pets.average(:weight) }
+end
+User.update_all_metrics!
+
+
 describe Metrics do
   describe "defining metrics" do
     let(:user) { User.create(:name => "Fuzz") }
-
-    before do
-      create_tables_for(:user)
-
-      class User < ActiveRecord::Base
-        include Metrics
-        has_metric :name_length do
-          name.length
-        end
-      end
-
-      User.update_all_metrics!
-    end
+    before { User.destroy_all }
+    after { User.destroy_all }
 
     it "creates rows for the metrics" do
-      UserMetrics.columns.count.should == 3
+      UserMetrics.columns.count.should == 7
       User.has_metric :name_length_squared do
         name_length * name_length
       end
       User.update_all_metrics!
-      UserMetrics.columns.count.should == 5
+      UserMetrics.columns.count.should == 9
       user.name_length_squared.should == 16
     end
 
@@ -50,6 +64,16 @@ describe Metrics do
       user
       User.update_all_metrics!
       UserMetrics.count(:group => :name_length).should == {4=>1}
+    end
+
+    describe 'aggregate functions' do
+      it 'calls aggregate function alone' do
+        user.pets.create!(age: 1, weight: 2)
+        UserMetrics.any_instance.should_not_receive(:average_pet_weight=)
+        User.update_all_metrics!
+        expect(user.average_pet_weight).to eql 2
+        expect(user.metrics.updated__average_pet_weight__at.to_i).to eql Time.current.to_i
+      end
     end
   end
 end

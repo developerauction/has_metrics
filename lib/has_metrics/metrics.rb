@@ -35,7 +35,25 @@ module Metrics
     def metrics_class
       @metrics_class
     end
+
     def has_metric name, options={}, &block
+      options.merge!(single: block) if block
+      define_single_method(name, options) if options[:single]
+
+      metrics[name.to_sym] ||= {}
+      metrics[name.to_sym].merge!(options)
+      metrics_class.class_eval do
+        attr_accessible(name, "updated__#{name}__at")
+      end
+    end
+
+    [:single, :aggregate].each do |mode|
+      define_method "has_#{mode}_metric" do |name, options = {}, &block|
+        has_metric name, options.merge(mode => block)
+      end
+    end
+
+    def define_single_method(name, options)
       define_method name do |*args|
         frequency = options[:every] || 20.hours
         previous_result = metrics.attributes[name.to_s] unless options[:every] == :always
@@ -43,57 +61,50 @@ module Metrics
         datestamp = metrics.attributes[datestamp_column]
         force = [:force, true].include?(args[0])
         case
-        when !force && previous_result && options[:once]
-          # Only calculate this metric once.  If it's not nil, reuse the old value.
-          previous_result
-        when !force && frequency.is_a?(Fixnum) && datestamp && datestamp > frequency.ago
-          # The metric was recently calculated and can be reused.
-          previous_result
-        else
-          result = instance_exec(&block)
-          result = nil if result.is_a?(Float) && !result.finite?
-          begin
-            metrics.send "#{name}=", result
-            metrics.send "#{datestamp_column}=", Time.current
-          rescue NoMethodError => e
-            raise e unless e.name == "#{name}=".to_sym
-            # This happens if the migrations haven't run yet for this metric. We should still calculate & return the metric.
-          end
-          unless changed?
-            metrics.save
-          end
-          result
+          when !force && previous_result && options[:once]
+            # Only calculate this metric once.  If it's not nil, reuse the old value.
+            previous_result
+          when !force && frequency.is_a?(Fixnum) && datestamp && datestamp > frequency.ago
+            # The metric was recently calculated and can be reused.
+            previous_result
+          else
+            result = instance_exec(&options[:single])
+            result = nil if result.is_a?(Float) && !result.finite?
+            begin
+              metrics.send "#{name}=", result
+              metrics.send "#{datestamp_column}=", Time.current
+            rescue NoMethodError => e
+              raise e unless e.name == "#{name}=".to_sym
+              # This happens if the migrations haven't run yet for this metric. We should still calculate & return the metric.
+            end
+            unless changed?
+              metrics.save
+            end
+            result
         end
-      end
-
-      (@metrics ||= []) << name.to_sym
-      @metrics.uniq!
-
-      if respond_to?(:has_custom_order_by)  # TODO: carve out has_custom_order_by functionality into this gem
-        unless metrics_class == self
-          has_custom_order_by name do |column, order|
-            { :joins => :metrics, :order => "#{reflect_on_association(:metrics).table_name}.#{column} #{order}" }
-          end
-        end
-      end
-
-      if options[:type] && (options[:type].to_sym == :float)
-        (@float_metrics ||= []) << name.to_sym
       end
     end
 
     def metrics
-      @metrics
+      @metrics ||= {}
+    end
+
+    def single_only_metrics
+      metrics.select{ |metric, options| !options.has_key?(:aggregate) }
+    end
+
+    def aggregate_metrics
+      metrics.select{ |metric, options| options.has_key?(:aggregate) }
     end
 
     def metrics_column_type(column)
       case
+      when (metric = metrics.select { |metric, options| metric == column.to_sym && options[:type] }).any?
+        metric.values.first[:type]
       when (column.to_s =~ /^by_(.+)$/) && respond_to?(:segment_categories) && segment_categories.include?($1.to_sym) # TODO: carve out segementation functionality into this gem
         :string
       when (column.to_s =~ /_at$/)
         :datetime
-      when @float_metrics && @float_metrics.include?(column.to_sym)
-        :float
       else
         :integer
       end
@@ -101,35 +112,40 @@ module Metrics
 
     def update_all_metrics!(*args)
       metrics_class.migrate!
-      # start_time = Time.zone.now
-      # total = all.count
-      # if caller.find {|c| c =~ /irb_binding/} # When called from irb
-      #   puts "Updating all metrics on #{name}: #{metrics.join(', ')}"
-      #   puts "Updating #{total} records."
-      #   progress_bar = ProgressBar.new("Progress", total)
-      # end
+
+      process_single_metrics if single_only_metrics.any?
+      process_aggregate_metrics
+
+      metrics
+    end
+
+    def process_single_metrics(*args)
       find_in_batches do |batch|
         metrics_class.transaction do
           batch.each do |record|
-            # puts "Updating record ##{record.id}: #{record}"
-            record.update_metrics!(*args)
+            record.class.single_only_metrics.each do |metric, options|
+              record.send(metric, *args)
+            end
           end
         end
-        # progress_bar.inc if progress_bar
       end
-      # progress_bar.finish if progress_bar
-      # elapsed = Time.zone.now - start_time
-      # Notifier.deliver_simple_message('allan@curebit.com', '[CUREBIT] Metrics computation time', "Finished calculating #{metrics.count} metrics on #{total} #{name.underscore.humanize.downcase.pluralize} in #{elapsed/60} minutes (#{elapsed/total} sec per entry) (#{elapsed/(total*metrics.count)} sec per metric). \n\nMetrics calculated:\n\n#{metrics.join("\n")}")
-      metrics
+    end
+
+    def process_aggregate_metrics
+      aggregate_metrics.each do |metric_name, options|
+        options[:aggregate].call
+        self.metrics_class.update_all "updated__#{metric_name}__at" => Time.current
+      end
     end
   end
-  ### END CLASS METHODS, START INSTANCE METHODS
+    ### END CLASS METHODS, START INSTANCE METHODS
 
   def update_metrics!(*args)
-    self.class.metrics.each do |metric|
+    self.class.metrics.each do |metric, options|
       send(metric, *args)
     end
   end
+
   ### END INSTANCE METHODS
 
   ### Sets up a class like "SiteMetrics".  These are all CLASS methods:
@@ -139,11 +155,11 @@ module Metrics
     end
 
     def metrics_updated_at_columns
-      @object_class.metrics.map{|metric| "updated__#{metric}__at"}
+      @object_class.metrics.keys.map{|metric| "updated__#{metric}__at"}
     end
 
     def required_columns
-      @object_class.metrics.map(&:to_s) + metrics_updated_at_columns
+      @object_class.metrics.keys.map(&:to_s) + metrics_updated_at_columns
     end
 
     def missing_columns
