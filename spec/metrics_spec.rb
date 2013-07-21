@@ -14,13 +14,31 @@ class User < ActiveRecord::Base
     name.length
   end
 
-  has_metric :pets_count do
-    pets.count
-  end
+  has_metric :pets_count,
+    single: -> { pets.count },
+    aggregate: %Q{
+                  UPDATE user_metrics
+                  SET pets_count = (
+                    SELECT COUNT(*)
+                    FROM pets
+                    INNER JOIN users
+                    ON users.id = pets.user_id
+                  );
+               }
 
   has_metric :average_pet_weight,
-             aggregate: -> { UserMetrics.update_all(average_pet_weight: 2) },
              single: -> { pets.average(:weight) }
+
+  has_aggregate_metric :average_pet_weight,
+                         %Q{
+                            UPDATE user_metrics
+                            SET average_pet_weight = (
+                              SELECT AVG(weight)
+                              FROM pets
+                              INNER JOIN users
+                              ON users.id == pets.user_id
+                            );
+                        }
 end
 User.update_all_metrics!
 

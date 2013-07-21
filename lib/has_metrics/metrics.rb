@@ -47,10 +47,8 @@ module Metrics
       end
     end
 
-    [:single, :aggregate].each do |mode|
-      define_method "has_#{mode}_metric" do |name, options = {}, &block|
-        has_metric name, options.merge(mode => block)
-      end
+    def has_aggregate_metric(name, sql)
+      has_metric name, {}.merge(aggregate: sql)
     end
 
     def define_single_method(name, options)
@@ -125,7 +123,6 @@ module Metrics
       puts "Go implement their aggregate methods in #{self} to speed this up.\n"
       puts single_only_metrics.keys
       puts "\n ≈ ≈ ≈ ≈ ≈ ≈ ≈ "
-      sleep 5.seconds
 
       find_in_batches do |batch|
         metrics_class.transaction do
@@ -140,7 +137,7 @@ module Metrics
 
     def process_aggregate_metrics
       aggregate_metrics.each do |metric_name, options|
-        options[:aggregate].call
+        ActiveRecord::Base.connection.execute options[:aggregate]
         self.metrics_class.update_all "updated__#{metric_name}__at" => Time.current
       end
     end
