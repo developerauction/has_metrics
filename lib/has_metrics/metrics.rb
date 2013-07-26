@@ -115,16 +115,17 @@ module Metrics
       detected_aggregate_metrics, singular_metrics = collect_metrics(warmup)
 
       if singular_metrics.any?
-        puts "Slow Metrics Found :: #{singular_metrics.count} \n"
-        puts " --  --  --  -- \n"
-        puts "Go implement their aggregate methods in #{self} to speed this up.\n"
-        puts singular_metrics.join(', ')
-        puts "\n ≈ ≈ ≈ ≈ ≈ ≈ ≈ "
+        unless ENV['RAILS_ENV'] == 'test'
+          puts "Slow Metrics Found :: #{singular_metrics.count} \n"
+          puts " --  --  --  -- \n"
+          puts "Go implement their aggregate methods in #{self} to speed this up.\n"
+          puts singular_metrics.join(', ')
+          puts "\n ≈ ≈ ≈ ≈ ≈ ≈ ≈ "
+        end
 
         find_in_batches do |batch|
           metrics_class.transaction do
             batch.each do |record|
-
               singular_metrics.each do |singular_metric|
                 record.send(singular_metric, *args)
               end
@@ -133,8 +134,25 @@ module Metrics
         end
       end
 
-      detected_aggregate_metrics.each do |update_sql|
-        ActiveRecord::Base.connection.execute update_sql
+      bad_guesses = []
+      detected_aggregate_metrics.each do |metric_name, update_sql|
+        begin
+          ActiveRecord::Base.connection.execute update_sql
+        rescue
+          bad_guesses << metric_name
+        end
+      end
+      if bad_guesses.any?
+        warn "#{bad_guesses.count} bad guesses found, scheduling as singular metrics."
+        find_in_batches do |batch|
+          metrics_class.transaction do
+            batch.each do |record|
+              bad_guesses.each do |singular_metric|
+                record.send(singular_metric, *args)
+              end
+            end
+          end
+        end
       end
 
       aggregate_metrics.each do |metric_name, options|
@@ -147,7 +165,7 @@ module Metrics
 
     def collect_metrics(warmup)
       singular_metrics = []
-      detected_aggregate_metrics = []
+      detected_aggregate_metrics = {}
       metrics.each do |metric_name, options|
         next if options[:aggregate]
         existing_logger = ActiveRecord::Base.logger
@@ -166,7 +184,7 @@ module Metrics
                  SET #{metric_name} = (#{subquery}),
                      updated__#{metric_name}__at = '#{Time.current.to_s(:db)}';
             }
-            detected_aggregate_metrics << update_sql
+            detected_aggregate_metrics[metric_name] = update_sql
           end
         end
       end
