@@ -143,7 +143,7 @@ module Metrics
         end
       end
       if bad_guesses.any?
-        warn "#{bad_guesses.count} bad guesses found, scheduling as singular metrics."
+        puts "#{bad_guesses.count} bad guesses found, scheduling as singular metrics."
         find_in_batches do |batch|
           metrics_class.transaction do
             batch.each do |record|
