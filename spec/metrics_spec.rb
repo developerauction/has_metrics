@@ -87,5 +87,17 @@ describe Metrics do
         expect(agg_result.to_d).to eql single_result.to_d
       end
     end
+
+    describe 'collect_metrics' do
+      it 'gives preferences to defined aggregate functions over detected ones' do
+        user.pets.create!(age: 1, weight: 2, age: 3)
+        User.has_metric :average_pet_age, single: -> { pets.average(:age) }, aggregate: 'SOME SQL'
+        UserMetrics.any_instance.should_not_receive(:average_pet_age=)
+        detected_aggregate_metrics, singular_metrics = User.collect_metrics(user)
+        expect(detected_aggregate_metrics.count).to eql 2
+        expect(singular_metrics.count).to eql 1
+        expect(User.aggregate_metrics.count).to eql 1
+      end
+    end
   end
 end

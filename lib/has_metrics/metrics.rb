@@ -149,7 +149,7 @@ module Metrics
       singular_metrics = []
       detected_aggregate_metrics = []
       metrics.each do |metric_name, options|
-
+        next if options[:aggregate]
         existing_logger = ActiveRecord::Base.logger
         sql_capturer = ActiveRecord::Base.logger = SqlCapturer.new(existing_logger)
         warmup.instance_exec(&options[:single])
