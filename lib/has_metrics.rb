@@ -1,6 +1,7 @@
 require "has_metrics/version"
 require "has_metrics/metrics"
 require "has_metrics/segmentation"
+require "has_metrics/sql_capturer"
 
 module HasMetrics
   def self.included(base)

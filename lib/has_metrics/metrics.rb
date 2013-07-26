@@ -111,35 +111,66 @@ module Metrics
     def update_all_metrics!(*args)
       metrics_class.migrate!
 
-      process_single_metrics if single_only_metrics.any?
-      process_aggregate_metrics
+      return unless warmup = first
+      detected_aggregate_metrics, singular_metrics = collect_metrics(warmup)
 
-      metrics
-    end
+      if singular_metrics.any?
+        puts "Slow Metrics Found :: #{singular_metrics.count} \n"
+        puts " --  --  --  -- \n"
+        puts "Go implement their aggregate methods in #{self} to speed this up.\n"
+        puts singular_metrics.join(', ')
+        puts "\n ≈ ≈ ≈ ≈ ≈ ≈ ≈ "
 
-    def process_single_metrics(*args)
-      puts "Slow Metrics Found :: #{single_only_metrics.count} \n"
-      puts " --  --  --  -- \n"
-      puts "Go implement their aggregate methods in #{self} to speed this up.\n"
-      puts single_only_metrics.keys
-      puts "\n ≈ ≈ ≈ ≈ ≈ ≈ ≈ "
+        find_in_batches do |batch|
+          metrics_class.transaction do
+            batch.each do |record|
 
-      find_in_batches do |batch|
-        metrics_class.transaction do
-          batch.each do |record|
-            record.class.single_only_metrics.each do |metric, options|
-              record.send(metric, *args)
+              singular_metrics.each do |singular_metric|
+                record.send(singular_metric, *args)
+              end
             end
           end
         end
       end
-    end
 
-    def process_aggregate_metrics
+      detected_aggregate_metrics.each do |update_sql|
+        ActiveRecord::Base.connection.execute update_sql
+      end
+
       aggregate_metrics.each do |metric_name, options|
         ActiveRecord::Base.connection.execute options[:aggregate]
-        self.metrics_class.update_all "updated__#{metric_name}__at" => Time.current
+        metrics_class.update_all "updated__#{metric_name}__at" => Time.current
       end
+
+      metrics
+    end
+
+    def collect_metrics(warmup)
+      singular_metrics = []
+      detected_aggregate_metrics = []
+      metrics.each do |metric_name, options|
+
+        existing_logger = ActiveRecord::Base.logger
+        sql_capturer = ActiveRecord::Base.logger = SqlCapturer.new(existing_logger)
+        warmup.instance_exec(&options[:single])
+        ActiveRecord::Base.logger = existing_logger
+
+
+        if sql_capturer.query.count != 1
+          singular_metrics << metric_name
+        else
+          subquery = sql_capturer.query.first.gsub(warmup.id.to_s, "#{metrics_class.table_name}.id")
+          unless subquery == %Q{SELECT "#{metrics_class.table_name}".* FROM "#{metrics_class.table_name}" WHERE "#{metrics_class.table_name}"."id" = #{metrics_class.table_name}.id LIMIT 1}
+            update_sql = %Q{
+              UPDATE #{metrics_class.table_name}
+                 SET #{metric_name} = (#{subquery}),
+                     updated__#{metric_name}__at = '#{Time.current.to_s(:db)}';
+            }
+            detected_aggregate_metrics << update_sql
+          end
+        end
+      end
+      return detected_aggregate_metrics, (singular_metrics - aggregate_metrics.keys)
     end
   end
     ### END CLASS METHODS, START INSTANCE METHODS

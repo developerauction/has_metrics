@@ -14,32 +14,15 @@ class User < ActiveRecord::Base
     name.length
   end
 
-  has_metric :pets_count,
-    single: -> { pets.count },
-    aggregate: %Q{
-                  UPDATE user_metrics
-                  SET pets_count = (
-                    SELECT COUNT(*)
-                    FROM pets
-                    INNER JOIN users
-                    ON users.id = pets.user_id
-                  );
-               }
+  has_metric :pets_count do
+    pets.count
+  end
 
-  has_metric :average_pet_weight,
-             single: -> { pets.average(:weight) }
-
-  has_aggregate_metric :average_pet_weight,
-                         %Q{
-                            UPDATE user_metrics
-                            SET average_pet_weight = (
-                              SELECT AVG(weight)
-                              FROM pets
-                              INNER JOIN users
-                              ON users.id == pets.user_id
-                            );
-                        }
+  has_metric :average_pet_weight do
+    pets.average(:weight)
+  end
 end
+UserMetrics.migrate!
 User.update_all_metrics!
 
 
@@ -85,12 +68,23 @@ describe Metrics do
     end
 
     describe 'aggregate functions' do
+      before { User.create!(name: 'Goose').pets.create! weight: 265 }
+
       it 'calls aggregate function alone' do
         user.pets.create!(age: 1, weight: 2)
         UserMetrics.any_instance.should_not_receive(:average_pet_weight=)
         User.update_all_metrics!
-        expect(user.average_pet_weight).to eql 2
         expect(user.metrics.updated__average_pet_weight__at.to_i).to eql Time.current.to_i
+        expect(user.average_pet_weight).to eql 2
+      end
+
+      it 'arrives at the same value as the single instance calculation' do
+        user.pets.create!(age: 1, weight: 2)
+        user.pets.create!(age: 3, weight: 8)
+        User.update_all_metrics!
+        agg_result = user.average_pet_weight
+        single_result = user.average_pet_weight(true)
+        expect(agg_result.to_d).to eql single_result.to_d
       end
     end
   end
