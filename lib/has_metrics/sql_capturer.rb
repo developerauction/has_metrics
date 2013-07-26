@@ -15,6 +15,10 @@ class SqlCapturer
     true
   end
 
+  def warn(message)
+    existing_logger.try(:warn, message)
+  end
+
   def capture(log)
     if select_statement = log.index("SELECT")
       self.query << log[select_statement..-1].gsub(/\e\[(\d+)m/, '')
