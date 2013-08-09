@@ -112,7 +112,24 @@ module Metrics
       metrics_class.migrate!
 
       return unless warmup = first
+
+      where("not exists(select id from #{metrics_class.table_name} where #{metrics_class.table_name}.id = users.id)").each do |resource|
+        resource.metrics.save!
+      end
+
       detected_aggregate_metrics, singular_metrics = collect_metrics(warmup)
+
+      bad_guesses = []
+      detected_aggregate_metrics.each do |metric_name, update_sql|
+        begin
+          ActiveRecord::Base.connection.execute update_sql
+        rescue
+          bad_guesses << metric_name
+        end
+      end
+      puts "#{bad_guesses.count} bad guesses found, scheduling as singular metrics." if bad_guesses.any?
+
+      singular_metrics = singular_metrics | bad_guesses
 
       if singular_metrics.any?
         unless ENV['RAILS_ENV'] == 'test'
@@ -127,27 +144,6 @@ module Metrics
           metrics_class.transaction do
             batch.each do |record|
               singular_metrics.each do |singular_metric|
-                record.send(singular_metric, *args)
-              end
-            end
-          end
-        end
-      end
-
-      bad_guesses = []
-      detected_aggregate_metrics.each do |metric_name, update_sql|
-        begin
-          ActiveRecord::Base.connection.execute update_sql
-        rescue
-          bad_guesses << metric_name
-        end
-      end
-      if bad_guesses.any?
-        puts "#{bad_guesses.count} bad guesses found, scheduling as singular metrics."
-        find_in_batches do |batch|
-          metrics_class.transaction do
-            batch.each do |record|
-              bad_guesses.each do |singular_metric|
                 record.send(singular_metric, *args)
               end
             end
