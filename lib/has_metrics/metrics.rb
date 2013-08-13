@@ -134,21 +134,15 @@ module Metrics
     end
 
     def collect_metrics(warmup)
-      singular_metrics = []
       detected_aggregate_metrics = {}
-      metrics.each do |metric_name, options|
+      metrics.select{|m,o| o[:infer_aggregate] }.each do |metric_name, options|
         next if options[:aggregate]
         existing_logger = ActiveRecord::Base.logger
         sql_capturer = ActiveRecord::Base.logger = SqlCapturer.new(existing_logger)
         warmup.instance_exec(&options[:single])
         ActiveRecord::Base.logger = existing_logger
 
-
-        require 'pry'; binding.pry if metric_name == :total_activities
-        require 'pry'; binding.pry if metric_name == :sent_activities
-        if sql_capturer.query.count != 1
-          singular_metrics << metric_name
-        else
+        unless sql_capturer.query.count != 1
           subquery = sql_capturer.query.first.gsub(warmup.id.to_s, "#{metrics_class.table_name}.id")
           unless subquery == %Q{SELECT "#{metrics_class.table_name}".* FROM "#{metrics_class.table_name}" WHERE "#{metrics_class.table_name}"."id" = #{metrics_class.table_name}.id LIMIT 1}
             update_sql = %Q{
@@ -160,7 +154,7 @@ module Metrics
           end
         end
       end
-      return detected_aggregate_metrics, (singular_metrics - aggregate_metrics.keys)
+      return detected_aggregate_metrics, (metrics.keys - aggregate_metrics.keys - detected_aggregate_metrics.keys)
     end
 
     def crank_detected_aggregate_metrics!(detected_aggregate_metrics)

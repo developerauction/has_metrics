@@ -25,15 +25,15 @@ class User < ActiveRecord::Base
   has_many :activities, through: :identity
 
   has_metric :name_length do
-    name.length
+    name.try(:length) || 0
   end
 
   has_metric :pets_count do
     pets.count
   end
 
-  has_metric :average_pet_weight do
-    pets.average(:weight)
+  has_metric :average_pet_weight, infer_aggregate: true do
+     pets.average(:weight)
   end
 
   has_metric :sent_activities do
@@ -48,7 +48,10 @@ describe Metrics do
   describe "defining metrics" do
     let(:user) { User.create(:name => "Fuzz") }
     before { User.destroy_all }
-    after { User.destroy_all }
+    after do
+      User.destroy_all
+      User.metrics.reject! {|m,o| m == :name_length_squared}
+    end
 
     it "creates rows for the metrics" do
       UserMetrics.columns.count.should == 9
@@ -107,21 +110,21 @@ describe Metrics do
     end
 
     describe 'collect_metrics' do
+      after { User.metrics.reject! {|k,v| k == :average_pet_age } }
       it 'gives preferences to defined aggregate functions over detected ones' do
         user.pets.create!(age: 1, weight: 2, age: 3)
         User.has_metric :average_pet_age, single: -> { pets.average(:age) }, aggregate: 'SOME SQL'
         UserMetrics.any_instance.should_not_receive(:average_pet_age=)
         detected_aggregate_metrics, singular_metrics = User.collect_metrics(user)
-        expect(detected_aggregate_metrics.count).to eql 3
-        expect(singular_metrics.count).to eql 1
+        expect(detected_aggregate_metrics.count).to eql 1
+        expect(singular_metrics.count).to eql 3
         expect(User.aggregate_metrics.count).to eql 1
-        User.metrics.reject! {|k,v| k == :average_pet_age }
       end
     end
 
     describe 'foreign key enable' do
       it 'asdfsdf' do
-        User.create!
+        User.create! # ensure user and identity don't have the same id
         user = User.create!(name: 'bill', identity: Identity.create(thoughts: 'hurp'))
         5.times do 
           Activity.create!(actor: user.identity, type: 'wtf')
