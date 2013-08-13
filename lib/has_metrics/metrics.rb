@@ -113,48 +113,22 @@ module Metrics
 
       return unless warmup = first
 
-      where("not exists(select id from #{metrics_class.table_name} where #{metrics_class.table_name}.id = users.id)").each do |resource|
+      where("not exists(select id from #{metrics_class.table_name} where #{metrics_class.table_name}.id = #{table_name}.id)").each do |resource|
         resource.metrics.save!
       end
 
       detected_aggregate_metrics, singular_metrics = collect_metrics(warmup)
 
-      bad_guesses = []
-      detected_aggregate_metrics.each do |metric_name, update_sql|
-        begin
-          ActiveRecord::Base.connection.execute update_sql
-        rescue
-          bad_guesses << metric_name
-        end
-      end
+      bad_guesses = crank_detected_aggregate_metrics!(detected_aggregate_metrics)
+      
       puts "#{bad_guesses.count} bad guesses found, scheduling as singular metrics." if bad_guesses.any?
-
       singular_metrics = singular_metrics | bad_guesses
 
       if singular_metrics.any?
-        unless ENV['RAILS_ENV'] == 'test'
-          puts "Slow Metrics Found :: #{singular_metrics.count} \n"
-          puts " --  --  --  -- \n"
-          puts "Go implement their aggregate methods in #{self} to speed this up.\n"
-          puts singular_metrics.join(', ')
-          puts "\n ≈ ≈ ≈ ≈ ≈ ≈ ≈ "
-        end
-
-        find_in_batches do |batch|
-          metrics_class.transaction do
-            batch.each do |record|
-              singular_metrics.each do |singular_metric|
-                record.send(singular_metric, *args)
-              end
-            end
-          end
-        end
+        crank_singular_metrics!(args, singular_metrics) 
       end
 
-      aggregate_metrics.each do |metric_name, options|
-        ActiveRecord::Base.connection.execute options[:aggregate]
-        metrics_class.update_all "updated__#{metric_name}__at" => Time.current
-      end
+      crank_aggregate_metrics!
 
       metrics
     end
@@ -170,6 +144,8 @@ module Metrics
         ActiveRecord::Base.logger = existing_logger
 
 
+        require 'pry'; binding.pry if metric_name == :total_activities
+        require 'pry'; binding.pry if metric_name == :sent_activities
         if sql_capturer.query.count != 1
           singular_metrics << metric_name
         else
@@ -179,15 +155,54 @@ module Metrics
               UPDATE #{metrics_class.table_name}
                  SET #{metric_name} = (#{subquery}),
                      updated__#{metric_name}__at = '#{Time.current.to_s(:db)}';
-            }
-            detected_aggregate_metrics[metric_name] = update_sql
+              }
+              detected_aggregate_metrics[metric_name] = update_sql
           end
         end
       end
       return detected_aggregate_metrics, (singular_metrics - aggregate_metrics.keys)
     end
+
+    def crank_detected_aggregate_metrics!(detected_aggregate_metrics)
+      bad_guesses = []
+      detected_aggregate_metrics.each do |metric_name, update_sql|
+        begin
+          ActiveRecord::Base.connection.execute update_sql
+        rescue
+          bad_guesses << metric_name
+        end
+      end
+      bad_guesses
+    end
+
+    def crank_singular_metrics!(args, singular_metrics)
+      unless ENV['RAILS_ENV'] == 'test'
+        puts "Slow Metrics Found :: #{singular_metrics.count} \n"
+        puts " --  --  --  -- \n"
+        puts "Go implement their aggregate methods in #{self} to speed this up.\n"
+        puts singular_metrics.join(', ')
+        puts "\n ≈ ≈ ≈ ≈ ≈ ≈ ≈ "
+      end
+
+      find_in_batches do |batch|
+        metrics_class.transaction do
+          batch.each do |record|
+            singular_metrics.each do |singular_metric|
+              record.send(singular_metric, *args)
+            end
+          end
+        end
+      end
+    end
+
+    def crank_aggregate_metrics!
+      aggregate_metrics.each do |metric_name, options|
+        ActiveRecord::Base.connection.execute options[:aggregate]
+        metrics_class.update_all "updated__#{metric_name}__at" => Time.current
+      end
+    end
   end
-    ### END CLASS METHODS, START INSTANCE METHODS
+  ### END CLASS METHODS, START INSTANCE METHODS
 
   def update_metrics!(*args)
     self.class.metrics.each do |metric, options|

@@ -6,9 +6,23 @@ class Pet < ActiveRecord::Base
 
 end
 
+class Identity < ActiveRecord::Base
+  has_one :user
+  has_many :activities, dependent: :destroy, foreign_key: :actor_id
+end
+
+class Activity < ActiveRecord::Base
+  belongs_to :actor, class_name: 'Identity'
+  attr_accessible :actor
+end
+
 class User < ActiveRecord::Base
+  attr_accessible :identity, :name
   include Metrics
+  belongs_to :identity
+
   has_many :pets, dependent: :destroy
+  has_many :activities, through: :identity
 
   has_metric :name_length do
     name.length
@@ -20,6 +34,10 @@ class User < ActiveRecord::Base
 
   has_metric :average_pet_weight do
     pets.average(:weight)
+  end
+
+  has_metric :sent_activities do
+    activities.count
   end
 end
 UserMetrics.migrate!
@@ -33,12 +51,12 @@ describe Metrics do
     after { User.destroy_all }
 
     it "creates rows for the metrics" do
-      UserMetrics.columns.count.should == 7
+      UserMetrics.columns.count.should == 9
       User.has_metric :name_length_squared do
         name_length * name_length
       end
       User.update_all_metrics!
-      UserMetrics.columns.count.should == 9
+      UserMetrics.columns.count.should == 11
       user.name_length_squared.should == 16
     end
 
@@ -94,9 +112,23 @@ describe Metrics do
         User.has_metric :average_pet_age, single: -> { pets.average(:age) }, aggregate: 'SOME SQL'
         UserMetrics.any_instance.should_not_receive(:average_pet_age=)
         detected_aggregate_metrics, singular_metrics = User.collect_metrics(user)
-        expect(detected_aggregate_metrics.count).to eql 2
+        expect(detected_aggregate_metrics.count).to eql 3
         expect(singular_metrics.count).to eql 1
         expect(User.aggregate_metrics.count).to eql 1
+        User.metrics.reject! {|k,v| k == :average_pet_age }
+      end
+    end
+
+    describe 'foreign key enable' do
+      it 'asdfsdf' do
+        User.create!
+        user = User.create!(name: 'bill', identity: Identity.create(thoughts: 'hurp'))
+        5.times do 
+          Activity.create!(actor: user.identity, type: 'wtf')
+        end
+        expect {
+          User.update_all_metrics!
+        }.to change { user.metrics.reload.sent_activities }.from(nil).to 5
       end
     end
   end
