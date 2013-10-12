@@ -53,7 +53,7 @@ module Metrics
 
     def define_single_method(name, options)
       define_method name do |*args|
-        frequency = options[:every] || 20.hours
+        frequency = options[:every] || 25.hours
         previous_result = metrics.attributes[name.to_s] unless options[:every] == :always
         datestamp_column = "updated__#{name}__at"
         datestamp = metrics.attributes[datestamp_column]
@@ -80,6 +80,11 @@ module Metrics
             end
             result
         end
+      end
+
+      if defined?(::NewRelic)
+        ::NewRelic::Agent.logger.debug "Installing instrumentation for #{name}"
+        add_transaction_tracer name, category: :task
       end
     end
 
