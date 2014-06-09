@@ -53,32 +53,25 @@ module Metrics
 
     def define_single_method(name, options)
       define_method name do |*args|
-        frequency = options[:every] || 25.hours
         previous_result = metrics.attributes[name.to_s] unless options[:every] == :always
         datestamp_column = "updated__#{name}__at"
-        datestamp = metrics.attributes[datestamp_column]
         force = [:force, true].include?(args[0])
-        case
-          when !force && previous_result && options[:once]
-            # Only calculate this metric once.  If it's not nil, reuse the old value.
-            previous_result
-          when !force && frequency.is_a?(Fixnum) && datestamp && datestamp > frequency.ago
-            # The metric was recently calculated and can be reused.
-            previous_result
-          else
-            result = instance_exec(&options[:single])
-            result = nil if result.is_a?(Float) && !result.finite?
-            begin
-              metrics.send "#{name}=", result
-              metrics.send "#{datestamp_column}=", Time.current
-            rescue NoMethodError => e
-              raise e unless e.name == "#{name}=".to_sym
-              # This happens if the migrations haven't run yet for this metric. We should still calculate & return the metric.
-            end
-            unless changed?
-              metrics.save
-            end
-            result
+        if !force && (options.has_key?(:aggregate) || options[:infer_aggregate])
+          previous_result
+        else
+          result = instance_exec(&options[:single])
+          result = nil if result.is_a?(Float) && !result.finite?
+          begin
+            metrics.send "#{name}=", result
+            metrics.send "#{datestamp_column}=", Time.current
+          rescue NoMethodError => e
+            raise e unless e.name == "#{name}=".to_sym
+            # This happens if the migrations haven't run yet for this metric. We should still calculate & return the metric.
+          end
+          unless changed?
+            metrics.save
+          end
+          result
         end
       end
 

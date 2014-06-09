@@ -69,8 +69,6 @@ describe Metrics do
 
       user.name = "Bib"
 
-      # since 20 hours hasn't passed, the value is pulled from cache, not recalculated
-      user.name_length.should == 4
       # (true) forces it to recalculate right away
       user.name_length(true).should == 3
 
