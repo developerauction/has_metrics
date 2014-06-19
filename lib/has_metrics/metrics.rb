@@ -52,7 +52,7 @@ module Metrics
 
       if metrics_class.respond_to?(:attr_accessible)
         metrics_class.class_eval do
-          attr_accessible(name, "updated__#{name}__at")
+          attr_accessible(name, "updated__#{name}__at") rescue RuntimeError
         end
       end
     end
