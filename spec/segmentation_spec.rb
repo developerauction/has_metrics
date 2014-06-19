@@ -30,7 +30,12 @@ describe Segmentation do
     end
 
     it "segments properly" do
-      PostMetrics.count(:group => :by_name_length).should == {'short'=>1, 'seven'=>1, 'long'=>1}
+      count = if RAILS_4_OR_GREATER
+                PostMetrics.group(:by_name_length).count
+              else
+                PostMetrics.count(:group => :by_name_length)
+              end
+      count.should == {'short'=>1, 'seven'=>1, 'long'=>1}
     end
   end
 end

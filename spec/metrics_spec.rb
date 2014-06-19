@@ -13,11 +13,12 @@ end
 
 class Activity < ActiveRecord::Base
   belongs_to :actor, class_name: 'Identity'
-  attr_accessible :actor
+  attr_accessible :actor if respond_to?(:attr_accessible)
+  self.inheritance_column = nil
 end
 
 class User < ActiveRecord::Base
-  attr_accessible :identity, :name
+  attr_accessible :identity, :name if respond_to?(:attr_accessible)
   include Metrics
   belongs_to :identity
 
@@ -83,7 +84,12 @@ describe Metrics do
     it "has their values precomputed" do
       user
       User.update_all_metrics!
-      UserMetrics.count(:group => :name_length).should == {4=>1}
+      count = if RAILS_4_OR_GREATER
+                UserMetrics.group(:name_length).count
+              else
+                UserMetrics.count(:group => :name_length)
+              end
+      count.should == { 4 => 1 }
     end
 
     describe 'aggregate functions' do
