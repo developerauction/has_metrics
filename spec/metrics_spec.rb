@@ -127,9 +127,9 @@ describe Metrics do
         5.times do 
           Activity.create!(actor: user.identity, type: 'wtf')
         end
-        expect {
-          User.update_all_metrics!
-        }.to change { user.metrics.reload.sent_activities }.from(nil).to 5
+        expect(user.metrics.sent_activities).to be_nil
+        User.update_all_metrics!
+        expect(user.metrics.reload.sent_activities).to eq(5)
       end
     end
   end

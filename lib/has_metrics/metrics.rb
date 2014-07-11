@@ -25,7 +25,7 @@ module Metrics
       end
 
       def metrics
-        @metrics ||= self.class.metrics_class.find_or_create_by_id(id)
+        @metrics ||= self.class.metrics_class.find_or_initialize_by_id(id)
       end
     end
   end
