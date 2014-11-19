@@ -25,7 +25,14 @@ module Metrics
       end
 
       def metrics
-        @metrics ||= self.class.metrics_class.find_or_initialize_by_id(id)
+        @metrics ||= begin
+          metrics_class = self.class.metrics_class
+          if metrics_class.respond_to?(:find_or_initialize_by)
+            metrics_class.find_or_initialize_by(id: id)
+          else
+            metrics_class.find_or_initialize_by_id(id)
+          end
+        end
       end
     end
   end
@@ -42,8 +49,11 @@ module Metrics
 
       metrics[name.to_sym] ||= {}
       metrics[name.to_sym].merge!(options)
-      metrics_class.class_eval do
-        attr_accessible(name, "updated__#{name}__at")
+
+      if metrics_class.respond_to?(:attr_accessible)
+        metrics_class.class_eval do
+          attr_accessible(name, "updated__#{name}__at") rescue RuntimeError
+        end
       end
     end
 
@@ -141,7 +151,15 @@ module Metrics
         ActiveRecord::Base.logger = existing_logger
 
         unless sql_capturer.query.count != 1
-          subquery = sql_capturer.query.first.gsub(warmup.id.to_s, "#{metrics_class.table_name}.id")
+          single_query = sql_capturer.query.first
+          subquery = if single_query =~ /(\?|\$\d+)/
+                       # AR 4 parameterized query style
+                       single_query
+                         .gsub(/\[\[.*?\]\]/, '')
+                         .gsub(/(\?|\$\d+)/, "#{metrics_class.table_name}.id")
+                     else
+                       single_query.gsub(warmup.id.to_s, "#{metrics_class.table_name}.id")
+                     end
           unless subquery == %Q{SELECT "#{metrics_class.table_name}".* FROM "#{metrics_class.table_name}" WHERE "#{metrics_class.table_name}"."id" = #{metrics_class.table_name}.id LIMIT 1}
             update_sql = %Q{
               UPDATE #{metrics_class.table_name}

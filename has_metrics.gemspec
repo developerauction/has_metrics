@@ -17,21 +17,7 @@ Gem::Specification.new do |s|
   s.summary = "Calculate \"metrics\" (any expensive methods) on ActiveRecord entries and memoize them to an automagical table."
   s.test_files = ["spec/metrics_spec.rb", "spec/segmentation_spec.rb", "spec/spec_helper.rb", "spec/support/active_record.rb"]
 
-  if s.respond_to? :specification_version then
-    s.specification_version = 4
-
-    if Gem::Version.new(Gem::VERSION) >= Gem::Version.new('1.2.0') then
-      s.add_runtime_dependency(%q<activerecord>, ["< 4.0"])
-      s.add_development_dependency(%q<rake>, [">= 0"])
-      s.add_development_dependency(%q<bundler>, [">= 0"])
-    else
-      s.add_dependency(%q<activerecord>, ["< 4.0"])
-      s.add_dependency(%q<rake>, [">= 0"])
-      s.add_dependency(%q<bundler>, [">= 0"])
-    end
-  else
-    s.add_dependency(%q<activerecord>, ["< 4.0"])
-    s.add_dependency(%q<rake>, [">= 0"])
-    s.add_dependency(%q<bundler>, [">= 0"])
-  end
+  s.add_dependency "activerecord"
+  s.add_development_dependency "rake"
+  s.add_development_dependency "bundler"
 end
