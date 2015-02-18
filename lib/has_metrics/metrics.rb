@@ -15,14 +15,8 @@ module Metrics
     end
 
     base.class_eval do
-      if klass.table_exists?
-        @metrics_class = klass
-        has_one :metrics, :class_name => klass_name, :foreign_key => 'id', :dependent => :destroy
-      else
-        @object_class = base
-        @metrics_class = base
-        base.extend(Metrics::MetricsClass)
-      end
+      @metrics_class = klass
+      has_one :metrics, :class_name => klass_name, :foreign_key => 'id', :dependent => :destroy
 
       def metrics
         @metrics ||= begin
