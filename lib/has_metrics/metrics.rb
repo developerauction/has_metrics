@@ -246,7 +246,7 @@ module Metrics
 
     end
 
-    class Metrics::Migration < ActiveRecord::Migration
+    class Metrics::Migration < ActiveRecord::Migration[5.1]
       def self.setup(metrics)
         @metrics = metrics
       end
