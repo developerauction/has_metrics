@@ -72,7 +72,7 @@ module Metrics
             raise e unless e.name == "#{name}=".to_sym
             # This happens if the migrations haven't run yet for this metric. We should still calculate & return the metric.
           end
-          unless changed?
+          unless saved_changes?
             metrics.save
           end
           result
